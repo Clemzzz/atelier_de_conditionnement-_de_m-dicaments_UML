@@ -10,64 +10,58 @@
 
 ## 5-1) Diagramme de cas d'utilisation (DCU)
 
-Le diagramme complet au format StarUML se trouve dans [`uml/atelier_conditionnement.mdj`](../uml/atelier_conditionnement.mdj) (modèle **`1) Cas d'utilisation`** → **`DCU - Atelier de conditionnement`**).
+Le diagramme complet au format StarUML se trouve dans [`uml/atelier_conditionnement.mdj`](../uml/atelier_conditionnement.mdj) (modèle **`1) Cas d'utilisation`** → **`DCU - Système de conditionnement`**).
 
 ### Choix de modélisation (conformément aux règles du cours)
 
-- **Bord du système** : `Atelier de conditionnement de médicaments`. Tous les acteurs sont placés **à l'extérieur** de ce bord.
-- **Acteurs (rôles extérieurs au système)** :
-  - `Pharmacien` : saisit des commandes manuelles et programme des commandes récurrentes sur l'application Web.
-  - `Hôte / Hôtesse` : reçoit les appels téléphoniques des pharmaciens et crée les commandes urgentes en tête de file.
-  - `SI Pharmacie` : système informatique de la pharmacie transmettant les sorties de stock pour déclencher les commandes automatiques.
-  - `Responsable d'atelier` : supervise le processus de conditionnement et consulte les rapports de production.
-  - `Opérateur MSA` : vérifie la caisse à l'aide du bon de livraison (BL) et la complète au magasin semi-automatique.
-  - `Opérateur poste d'erreur` : reprend intégralement une commande depuis le début après deux pesées non conformes en MSA.
-  - `Opérateur MM` : complète la caisse au magasin manuel pour les produits complexes (frigorifiques, fragiles, encombrants).
-  - `Opérateur de cerclage` : place le ticket d'adresse sur le couvercle et ferme la caisse avec un anneau (poste COU).
-  - `Chauffeur` : récupère les caisses sur la rampe de livraison (RAM) et assure la livraison vers les pharmacies.
-  - *Remarque* : les équipements internes (caisses, convoyeurs, balances, serveurs, API, imprimantes) font partie du système et ne sont donc **pas** modélisés comme acteurs.
-- **Cas d'utilisation (19 cas ≥ 10 requis)** : tous nommés avec un **verbe d'action à l'infinitif + complément** (test : *« L'acteur peut \<cas\> »*).
+- **Bord du système** : `Système de conditionnement de médicaments`. Tous les acteurs sont placés **à l'extérieur** de ce bord.
+- **5 acteurs (strictement issus du dossier technique, aucun acteur inventé)** :
+  - `Pharmacien` : passe des commandes manuelles et programme des commandes récurrentes sur l'application Web.
+  - `Hôte·sse` : reçoit l'appel téléphonique du pharmacien et saisit la commande urgente en tête de la base `ACM_Commande`.
+  - `Système info. pharmacie` : système tiers externe transmettant les sorties de stock pour déclencher les commandes automatiques.
+  - `Opérateur` : intervient sur les postes humains de l'atelier — complétion/vérification en magasin semi-automatique (`MSA`), reprise au poste d'erreur après 2 échecs, préparation des produits complexes au magasin manuel (`MM`), et pose du ticket d'adresse + cerclage du couvercle (`COU`).
+  - `Chauffeur` : récupère les caisses sur la rampe de livraison (`RAM`) et assure la livraison vers les pharmacies.
+  - *Remarque* : les équipements internes (caisses, convoyeurs, balances, serveurs, API, imprimantes) font partie du système et ne sont donc **pas** modélisés comme acteurs. Le lancement d'un cycle de `Conditionner une commande` est automatisé dès qu'une commande est disponible dans `ACM_Commande`, et implique systématiquement l'`Opérateur` en fin de chaîne (`Fermer et étiqueter la caisse`).
+- **18 cas d'utilisation (≥ 10 requis)** : tous nommés avec un **verbe d'action à l'infinitif + complément** (test : *« L'acteur peut \<cas\> »*).
 - **Relations utilisées** :
-  - **Généralisation (`generalize`)** : les 4 modes de commande (`Effectuer une commande manuelle`, `Programmer une commande récurrente`, `Créer une commande urgente`, `Générer une commande automatique`) spécialisent le cas abstrait `Passer une commande`.
-  - **Inclusions (`«include»` — nécessité obligatoire)** :
-    - `Effectuer une commande manuelle`, `Programmer une commande récurrente`, `Créer une commande urgente` ──`«include»`──▶ `S'authentifier`
-    - `Superviser le conditionnement` ──`«include»`──▶ `Éditer le bon de livraison`, `Calculer l'itinéraire`, `Éditer la facture`, `Imprimer le ticket d'adresse`
-    - `Conditionner en magasin automatique` et `Compléter en magasin semi-automatique` ──`«include»`──▶ `Contrôler la masse de la caisse`
-    - `Fermer et étiqueter la caisse` ──`«include»`──▶ `Imprimer le ticket d'adresse`
-  - **Extensions (`«extend»` — enrichissement optionnel)** :
-    - `Conditionner en magasin automatique` ──`«extend»`──▶ `Superviser le conditionnement` *(selon le type de produits de la commande)*
-    - `Compléter en magasin semi-automatique` ──`«extend»`──▶ `Superviser le conditionnement` *(si produits spécifiques ou erreur de pesée en MA)*
-    - `Compléter en magasin manuel` ──`«extend»`──▶ `Superviser le conditionnement` *(si produits frigorifiques, fragiles ou encombrants)*
-    - `Reprendre une commande en erreur` ──`«extend»`──▶ `Compléter en magasin semi-automatique` *(uniquement si le poids reste non conforme après 2 passages en MSA)*
-  - **Associations acteur–cas** : traits simples sans flèche.
+  - **Généralisations (`generalize`, ×4)** : les 4 modes de commande (`Passer une commande manuelle`, `Programmer une commande récurrente`, `Saisir une commande urgente`, `Envoyer une commande automatique`) spécialisent `Passer une commande`.
+  - **Inclusions (`«include»`, ×10 — nécessité obligatoire)** :
+    - `Passer une commande manuelle` et `Programmer une commande récurrente` ──`«include»`──▶ `S'authentifier` *(commandes Web uniquement)*
+    - `Conditionner une commande` ──`«include»`──▶ `Générer le bon de livraison`, `Calculer l'itinéraire`, `Éditer la facture`, `Imprimer le ticket d'adresse`, `Fermer et étiqueter la caisse`
+    - `Conditionner en magasin automatique (MA)` et `Compléter en magasin semi-automatique (MSA)` ──`«include»`──▶ `Contrôler le poids de la caisse` *(non inclus sur `MM`, où il n'y a pas de contrôle automatisé)*
+    - `Fermer et étiqueter la caisse` ──`«include»`──▶ `Imprimer le ticket d'adresse` *(l'opérateur pose le ticket sur le couvercle avant fermeture)*
+  - **Extensions (`«extend»`, ×4 — enrichissement optionnel)** :
+    - `Conditionner en magasin automatique (MA)` ──`«extend»`──▶ `Conditionner une commande`
+    - `Compléter en magasin semi-automatique (MSA)` ──`«extend»`──▶ `Conditionner une commande` *(si produits spécifiques ou erreur de pesée en MA)*
+    - `Compléter en magasin manuel (MM)` ──`«extend»`──▶ `Conditionner une commande` *(si produits frigorifiques, fragiles ou encombrants)*
+    - `Reprendre une commande en erreur` ──`«extend»`──▶ `Compléter en magasin semi-automatique (MSA)` *(uniquement si le poids reste non conforme après 2 passages en MSA)*
+  - **Associations acteur–cas (×9)** : traits simples sans flèche.
 
 ### Aperçu schématique (Mermaid)
 
 ```mermaid
 flowchart LR
     PHARM["Pharmacien"]
-    HOTE["Hôte / Hôtesse"]
-    SI["SI Pharmacie"]
-    RESP["Responsable d'atelier"]
+    HOTE["Hôte·sse"]
+    SI["Système info. pharmacie"]
     CHAUF["Chauffeur"]
 
-    subgraph SYS["Atelier de conditionnement de médicaments"]
-        CMD_MAN(["Effectuer une commande manuelle"])
+    subgraph SYS["Système de conditionnement de médicaments"]
+        CMD_MAN(["Passer une commande manuelle"])
         CMD_REC(["Programmer une commande récurrente"])
-        CMD_URG(["Créer une commande urgente"])
-        CMD_AUTO(["Générer une commande automatique"])
+        CMD_URG(["Saisir une commande urgente"])
+        CMD_AUTO(["Envoyer une commande automatique"])
         PASSER(["Passer une commande"])
         AUTH(["S'authentifier"])
 
-        RAPPORTS(["Consulter les rapports de production"])
-        SUP(["Superviser le conditionnement"])
-        BL(["Éditer le bon de livraison"])
+        COND(["Conditionner une commande"])
+        BL(["Générer le bon de livraison"])
         ITIN(["Calculer l'itinéraire"])
-        MA(["Conditionner en magasin automatique"])
-        PESER(["Contrôler la masse de la caisse"])
-        MSA(["Compléter en magasin semi-automatique"])
+        MA(["Conditionner en magasin automatique (MA)"])
+        PESER(["Contrôler le poids de la caisse"])
+        MSA(["Compléter en magasin semi-automatique (MSA)"])
         ERR(["Reprendre une commande en erreur"])
-        MM(["Compléter en magasin manuel"])
+        MM(["Compléter en magasin manuel (MM)"])
         FAC(["Éditer la facture"])
         ADR(["Imprimer le ticket d'adresse"])
         CERCL(["Fermer et étiqueter la caisse"])
@@ -75,21 +69,21 @@ flowchart LR
 
         CMD_MAN -. "«include»" .-> AUTH
         CMD_REC -. "«include»" .-> AUTH
-        CMD_URG -. "«include»" .-> AUTH
 
         CMD_MAN -->|"generalize"| PASSER
         CMD_REC -->|"generalize"| PASSER
         CMD_URG -->|"generalize"| PASSER
         CMD_AUTO -->|"generalize"| PASSER
 
-        SUP -. "«include»" .-> BL
-        SUP -. "«include»" .-> ITIN
-        SUP -. "«include»" .-> FAC
-        SUP -. "«include»" .-> ADR
+        COND -. "«include»" .-> BL
+        COND -. "«include»" .-> ITIN
+        COND -. "«include»" .-> FAC
+        COND -. "«include»" .-> ADR
+        COND -. "«include»" .-> CERCL
 
-        MA -. "«extend»" .-> SUP
-        MSA -. "«extend»" .-> SUP
-        MM -. "«extend»" .-> SUP
+        MA -. "«extend»" .-> COND
+        MSA -. "«extend»" .-> COND
+        MM -. "«extend»" .-> COND
         ERR -. "«extend»" .-> MSA
 
         MA -. "«include»" .-> PESER
@@ -97,23 +91,18 @@ flowchart LR
         CERCL -. "«include»" .-> ADR
     end
 
-    OP_MSA["Opérateur MSA"]
-    OP_ERR["Opérateur poste d'erreur"]
-    OP_MM["Opérateur MM"]
-    OP_CERCL["Opérateur de cerclage"]
+    OP["Opérateur"]
 
     PHARM --- CMD_MAN
     PHARM --- CMD_REC
     HOTE --- CMD_URG
     SI --- CMD_AUTO
-    RESP --- RAPPORTS
-    RESP --- SUP
     CHAUF --- LIV
 
-    MSA --- OP_MSA
-    ERR --- OP_ERR
-    MM --- OP_MM
-    CERCL --- OP_CERCL
+    MSA --- OP
+    ERR --- OP
+    MM --- OP
+    CERCL --- OP
 ```
 
 ---
