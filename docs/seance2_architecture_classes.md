@@ -18,7 +18,7 @@ Les 24 objets informatiques identifiés en Séance 1 ([`docs/seance1_analyse.md`
 | --- | --- | --- |
 | **Serveur de gestion**<br>*(VM Debian 12.5 sur Gigabyte G492-Z51, RAID 5 200 To, Serveur Web, SGBD, NFS)* | `Pharmacie`, `Commande` *(persistance)*, `LigneCommande` *(persistance)*, `Medicament` *(référentiel)*, `Itineraire` *(stockage NFS)*, `EtapeItineraire` *(stockage NFS)*, `RapportProduction` *(archivage NFS)*, `IHM` *(application Web & passerelle)* | Stocke les bases `ACM_Commande`, `ACM_MedicamentAtelier` et `ACM_MagasinAuto` ; expose l'application Web (commandes manuelles et récurrentes des pharmaciens, saisie urgente par l'hôte·sse) et l'API de réception des commandes automatiques ; héberge le volume NFS partagé pour les itinéraires et rapports de production. |
 | **Serveur de production**<br>*(2ᵉ VM Debian 12.5 sur Gigabyte G492-Z51, client NFS — chef d'orchestre)* | `Commande` *(active)*, `LigneCommande` *(active)*, `Medicament` *(en cours)*, `BonDeLivraison`, `Itineraire` *(calcul)*, `EtapeItineraire` *(calcul)*, `Caisse`, `PosteSemiAuto`, `Facture`, `TicketAdresse`, `RapportProduction` *(génération)*, `Imprimante` *(ADR & FAC)*, `IHM` *(supervision / postes opérateurs)* | Orchestre tout le cycle de conditionnement : lit les commandes en attente et les fiches médicaments sur le serveur de gestion, calcule l'itinéraire et les masses attendues, génère le BL, pilote les caisses via l'API, contrôle les pesées via le poste de pesée, oriente vers MA/MSA/MM/erreur, génère les tickets d'adresse, factures et rapports de production. |
-| **Superviseur**<br>*(PC industriel fanless Galium, OS9 v6.0, E/S TOR 6 bits, codeurs 16 bits, sorties tension variable)* | `Magasin` (`MA1`–`MA3`), `Ejecteur` (`3 × 40`), `TapisRoulant` (`×3`), `Tas`, `FileDeCommande` (`×3`), `Codeur` (`×3`) | Pilote en temps réel les 3 magasins automatiques : charge les références CIP depuis `ACM_MagasinAuto`, reçoit les commandes transmises par le serveur de production dans ses files FIFO, synchronise l'avancement des tapis via les codeurs incrémentaux et déclenche/contrôle les 40 éjecteurs par magasin. |
+| **Superviseur**<br>*(PC industriel fanless Galium, OS9 v6.0, E/S TOR 6 bits, codeurs 16 bits, sorties tension variable 0-10V)* | `Magasin` (`MA1`–`MA3`), `Ejecteur` (`3 × 40`), `TapisRoulant` (`×3`), `Tas`, `FileDeCommande` (`×3`), `Codeur` (`×3`) | Pilote en temps réel les 3 magasins automatiques : charge les références CIP depuis `ACM_MagasinAuto`, reçoit les commandes transmises par le serveur de production dans ses files FIFO, synchronise l'avancement des tapis via les codeurs incrémentaux et déclenche/contrôle les 40 éjecteurs par magasin. |
 | **Poste de lancement (`LCT`)**<br>*(Dell Optiplex 3020 SFF, Windows 11)* | `BonDeLivraison` *(reçu)*, `Imprimante` *(LCT)*, `LecteurCodeBarre` *(`LCB1` uniquement)*, `Caisse` *(association initiale)*, `IHM` *(poste LCT)* | Reçoit le BL depuis le serveur de production, l'imprime et le dépose dans la caisse ; lit le code-barre initial via `LCB1` et déclenche l'acheminement d'une caisse vide pour démarrer le cycle. |
 | **Poste de pesée**<br>*(Dell Optiplex 3020 SFF, Ubuntu 20.4, interface RS485 Modbus)* | `Balance` (`B1`–`B12`) | Sert de passerelle d'acquisition temps réel pour les 12 balances de l'atelier : reçoit les demandes de pesée du serveur de production sur Ethernet, interroge la balance ciblée en Modbus sur RS485 et retourne la masse mesurée. |
 | **Automates Programmables Industriels (`API`)**<br>*(GE FANUC IC655CPU500H, plusieurs unités)* | `LecteurCodeBarre` *(`LCB2` à `LCB22`)*, `Aiguillage` (`A1` à `A19`), `Convoyeur` *(principaux, débrayables et parallèles)* | Acquièrent en continu les passages devant les 21 lecteurs `LCB2`–`LCB22` et remontent les identifiants au serveur de production ; exécutent ses ordres en pilotant les moteurs de convoyeurs et l'orientation des 19 aiguillages. |
@@ -87,7 +87,7 @@ Comparer `Ethernet` et `Modbus` nécessite d'abord de lever une ambiguïté fond
 | **Usage type** | Dorsale informatique, serveurs, Web, bases de données, API | Capteurs, balances industrielles, variateurs, automates simples |
 
 **Choix justifié dans l'atelier** : l'architecture combine les deux technologies là où chacune excelle :
-- **Dorsale `Ethernet`** pour interconnecter le serveur de gestion/production, les postes Windows/Ubuntu, le superviseur OS9 et les API GE FANUC (flux riches : SQL, HTTP, NFS, commandes applicatives).
+- **Dorsale `Ethernet` commutée** (`Switch Ethernet LAN Atelier`) pour interconnecter le serveur de gestion/production, les postes Windows/Ubuntu, le superviseur OS9, les imprimantes `ADR`/`FAC` et les API GE FANUC (flux riches : SQL, HTTP, NFS, commandes applicatives).
 - **Protocole `Modbus` sur bus `RS485`** (p. 5 §4.2) entre le poste de pesée et les **12 balances (`B1`–`B12`)** : chaque balance possède une adresse esclave unique, et le poste de pesée (maître) lui demande une mesure sur requête explicite sans encombrer le réseau IP avec 12 équipements série de terrain.
 
 ---
@@ -147,115 +147,127 @@ Comparer `Ethernet` et `Modbus` nécessite d'abord de lever une ambiguïté fond
 
 ## 5-7) Diagramme de déploiement du système
 
-Le diagramme de déploiement complet se trouve dans [`uml/atelier_conditionnement.mdj`](../uml/atelier_conditionnement.mdj) (modèle **`2) Déploiement`** → **`Déploiement - Atelier de conditionnement`**).
+Le diagramme de déploiement complet (issus de la **fusion optimale** des propositions du groupe) se trouve dans [`uml/atelier_conditionnement.mdj`](../uml/atelier_conditionnement.mdj) (modèle **`2) Déploiement`** → **`Déploiement - Atelier de conditionnement`**).
 
 ### Choix de modélisation (conformément au cours `R201_UML2.pdf` et à `prepaTD8B.pdf`)
 
-- **Nœuds matériels (`«server»`, `«industrial station»`, `«PLC»`, `«client workstation»`, `«device»`)** et **environnements d'exécution imbriqués (`«OS»`, `«virtual machine»`, `«web server»`, `«DBMS»`, `«web browser»`, `«folder»`)** :
+- **Organisation compacte en 4 étages via un `Switch Ethernet (LAN Atelier)`** :
+  - Élimine les croisements de liaisons Ethernet autour du serveur et reflète fidèlement l'infrastructure commutée reliant le serveur Gigabyte, le `Superviseur`, les deux `Dell Optiplex 3020` (`«client workstation»`), l'`API` (`«PLC»`) et les imprimantes `ADR` et `FAC`.
+- **Nœuds matériels, environnements d'exécution imbriqués (`containerView`) et artefacts nommés** :
   - L'hôte physique **`Gigabyte G492-Z51`** (`«server»`, `RAID 5 - 200 To`) exécute **`Debian 12.5`** (`«OS»`), qui héberge les deux machines virtuelles **`Serveur de gestion`** et **`Serveur de production`** (`«virtual machine»`).
-  - Sur le `Serveur de gestion` sont déployés le serveur Web (`«web server»`), le SGBD (`«DBMS»`) contenant les trois bases (`«database» ACM_Commande`, `ACM_MedicamentAtelier`, `ACM_MagasinAuto`), et le **`Volume NFS`** (`«folder»`) stockant les itinéraires (`itineraire.ods`) et les rapports de production.
-  - Le `Serveur de production` embarque l'orchestrateur (`«artifact» orchestrateur_prod`) et le point de montage client NFS communiquant directement avec le `Volume NFS` (`NFS`) et le `SGBD` (`SQL`).
-- **Distinction liaisons physiques vs protocoles logiques** :
-  - Connexions LAN générales annotées **`Ethernet / TCP-IP`** vers le `Poste de lancement`, le `Poste de pesée`, le `Superviseur`, les `API GE FANUC` (`1..*`) et les imprimantes `ADR` et `FAC`.
-  - Connexions logiques entre environnements d'exécution/artefacts annotées par leur protocole : **`HTTPS`** (navigateur ↔ serveur Web), **`HTTPS / API`** (SI pharmacie ↔ serveur Web), **`SQL`** et **`NFS`** (serveur de production ↔ serveur de gestion).
-  - Connexions terrain annotées par bus et signalisation : **`RS485 / Modbus RTU`** (`Poste de pesée` → `12` balances), **`RS232 / USB`** (`Poste de lancement` → `LCB1`), **`USB / Ethernet`** (`Poste de lancement` → `Imprimante LCT`), **`TOR / Entrées-Sorties`** (cartes E/S du `Superviseur` vers les `3` magasins automatiques : analogique moteur CC, TOR 6 bits éjecteurs & cellules, 16 bits codeur incrémental ; `API` vers `21` LCB, `19` aiguillages et `1..*` convoyeurs).
+  - Sur le `Serveur de gestion` sont modélisés en vrais nœuds (`UMLNode`) : le **`Serveur Web`** (`«web server»` contenant `appli_commandes_web`), le **`SGBD`** (`«DBMS»` contenant les 3 artefacts `«database» ACM_Commande`, `ACM_MedicamentAtelier`, `ACM_MagasinAuto`), et le **`Volume NFS`** (`«folder»` contenant `«file» itineraire.ods / rapports`).
+  - Le `Serveur de production` embarque `«artifact» orchestrateur_prod` et `«folder» Montage client NFS` reliés sans croisement aux ressources du `Serveur de gestion` (`SQL` et `NFS`).
+- **Distinction liaisons physiques vs protocoles logiques et multiplicités exactes** :
+  - `HTTPS` (Navigateur Web ↔ Serveur Web, `*` ↔ `1`), `HTTPS / API` (SI Pharmacie ↔ Serveur Web, `*` ↔ `1`).
+  - `Ethernet / TCP-IP (SQL)` vers le `Switch Ethernet` puis vers les postes, le `Superviseur` (accès `ACM_MagasinAuto` inclus), l'`API` (`1` ↔ `1..*`) et les deux imprimantes `ADR`/`FAC`.
+  - Liaisons terrain dédiées : **`0-10V / TOR 6b / 16b`** (`Superviseur` → `3` magasins auto détaillant Moteur CC, Codeur incrémental, 40 Éjecteurs, 40 Cellules photo.), **`RS232 / USB`** (`Poste LCT` → `LCB1`), **`USB / Ethernet`** (`Poste LCT` → `Imprimante BL`), **`RS485 / Modbus RTU`** (`Poste pesée` → `12` balances), **`Série / Bus indus.`** (`API` → `21` LCB) et **`TOR`** (`API` → `19` aiguillages, `1..*` convoyeurs).
 
 ### Aperçu schématique (Mermaid)
 
 ```mermaid
-flowchart LR
-    subgraph EXT["Postes clients & externes"]
-        NAV["«client workstation» Poste Pharmacien / Hôte·sse\n«OS» · «web browser» Navigateur Web"]
-        SIPH["«server» SI Pharmacie"]
-    end
-
-    subgraph LCT_GRP["Poste de lancement"]
-        LCT["«device» Dell Optiplex 3020 SFF\n«OS» Windows 11\n«artifact» appli_lancement"]
-        LCB1["«device» Lecteur code-barre LCB1"]
-        IMPLCT["«device» Imprimante LCT (BL)"]
-        LCT ---|"RS232 / USB"| LCB1
-        LCT ---|"USB / Ethernet"| IMPLCT
-    end
-
-    subgraph SRV_PHYS["«server» Gigabyte G492-Z51 (RAID 5 - 200 To) / «OS» Debian 12.5"]
-        subgraph VM_GEST["«virtual machine» Serveur de gestion"]
-            WEB["«web server» Serveur Web\nappli_commandes_web"]
-            SGBD["«DBMS» SGBD\nACM_Commande · ACM_MedicamentAtelier · ACM_MagasinAuto"]
-            NFS["«folder» Volume NFS\nitineraire.ods · rapports_production"]
+flowchart TB
+    subgraph TOP["Étage 1 — Clients & Serveur Rackable"]
+        direction LR
+        subgraph EXT["Clients & Externes"]
+            NAV["«client workstation» Poste Pharmacien / Hôte·sse\n«OS» · «web browser» Navigateur Web"]
+            SIPH["«server» SI Pharmacie"]
         end
-        subgraph VM_PROD["«virtual machine» Serveur de production"]
-            PROD["«artifact» orchestrateur_prod\n+ Montage client NFS"]
+
+        subgraph SRV["«server» Gigabyte G492-Z51 (RAID 5 - 200 To) / «OS» Debian 12.5"]
+            direction LR
+            subgraph GEST["«virtual machine» Serveur de gestion"]
+                WEB["«web server» Serveur Web\nappli_commandes_web"]
+                SGBD["«DBMS» SGBD\nACM_Commande · ACM_MedicamentAtelier · ACM_MagasinAuto"]
+                NFS["«folder» Volume NFS\nitineraire.ods / rapports"]
+            end
+            subgraph PROD["«virtual machine» Serveur de production"]
+                ORCH["«artifact» orchestrateur_prod"]
+                MNT["«folder» Montage client NFS"]
+            end
+            ORCH <-->|"SQL"| SGBD
+            MNT <-->|"NFS"| NFS
         end
-        PROD <-->|"SQL"| SGBD
-        PROD <-->|"NFS"| NFS
+
+        NAV <-->|"HTTPS (* / 1)"| WEB
+        SIPH -->|"HTTPS / API (* / 1)"| WEB
     end
 
-    subgraph PES_GRP["Poste de pesée"]
-        PES["«device» Dell Optiplex 3020 SFF\n«OS» Linux Ubuntu 20.4\n«artifact» service_pesee"]
+    subgraph NET["Étage 2 — Dorsale LAN & Imprimantes fin de chaîne"]
+        direction LR
+        SW["«device» Switch Ethernet (LAN Atelier)"]
+        ADR["«device» Imprimante ADR"]
+        FAC["«device» Imprimante FAC"]
+        SW -->|"Ethernet / TCP-IP"| ADR
+        SW -->|"Ethernet / TCP-IP"| FAC
+    end
+
+    SRV <-->|"Ethernet / TCP-IP (SQL)"| SW
+
+    subgraph POSTES["Étage 3 — Postes industriels, Bureautiques & API"]
+        direction LR
+        SUP["«industrial station» Superviseur : PC Galium fanless\n«OS» OS9 v6.0 · gest_magasin_auto · Cartes E/S (0-10V, 6b, 16b)"]
+        LCT["«client workstation» Poste lancement : Optiplex 3020\n«OS» Windows 11 · appli_lancement"]
+        PES["«client workstation» Poste pesée : Optiplex 3020\n«OS» Ubuntu 20.4 · service_pesee"]
+        API["«PLC» API : GE FANUC IC655CPU500H (1..*)\nprog_convoyage"]
+    end
+
+    SW <-->|"Ethernet / TCP-IP, SQL"| SUP
+    SW <-->|"Ethernet / TCP-IP"| LCT
+    SW <-->|"Ethernet / TCP-IP"| PES
+    SW <-->|"Ethernet / TCP-IP (1 / 1..*)"| API
+
+    subgraph FIELD["Étage 4 — Équipements terrain"]
+        direction LR
+        MA["«device» Magasin automatique MA1..MA3 (×3)\nMoteur CC · Codeur incrémental · Éjecteurs (40) · Cellules (40)"]
+        LCB1["«device» Lecteur LCB1"]
+        IMPLCT["«device» Imprimante BL (LCT)"]
         BAL["«device» Balance B1..B12 (×12)"]
-        PES <-->|"RS485 / Modbus RTU"| BAL
-    end
-
-    subgraph SUP_GRP["Superviseur & Magasins auto"]
-        SUP["«industrial station» PC Galium Fanless\n«OS» OS9 v6.0 · «device» Cartes E/S\n«artifact» gest_magasin_auto"]
-        MA["«device» Magasin automatique MA1..MA3 (×3)\nMoteur CC · Éjecteurs (40) · Cellules (40) · Codeur"]
-        SUP <-->|"Analogique / TOR 6b / 16b"| MA
-    end
-
-    subgraph API_GRP["Automates & Convoyage"]
-        API["«PLC» GE FANUC IC655CPU500H (1..*)\n«artifact» prog_convoyage"]
-        LCB_N["«device» LCB2..LCB22 (×21)"]
+        LCBN["«device» Lecteur LCB2..LCB22 (×21)"]
         AIG["«device» Aiguillage A1..A19 (×19)"]
-        CONV["«device» Convoyeurs (1..*)"]
-        API ---|"Série / Bus indus."| LCB_N
-        API ---|"TOR"| AIG
-        API ---|"TOR"| CONV
+        CONV["«device» Convoyeur (1..*)"]
     end
 
-    IMP_FIN["«device» Imprimantes ADR & FAC (×2)"]
-
-    NAV <-->|"HTTPS"| WEB
-    SIPH -->|"HTTPS / API"| WEB
-    PROD <-->|"Ethernet / TCP-IP"| LCT
-    PROD <-->|"Ethernet / TCP-IP"| PES
-    PROD <-->|"Ethernet / TCP-IP"| SUP
-    PROD <-->|"Ethernet / TCP-IP"| API
-    PROD -->|"Ethernet / TCP-IP"| IMP_FIN
+    SUP <-->|"0-10V / TOR 6b / 16b (1 / 3)"| MA
+    LCT ---|"RS232 / USB"| LCB1
+    LCT ---|"USB / Ethernet"| IMPLCT
+    PES <-->|"RS485 / Modbus RTU (1 / 12)"| BAL
+    API ---|"Série / Bus indus. (21)"| LCBN
+    API ---|"TOR (19)"| AIG
+    API ---|"TOR (1..*)"| CONV
 ```
 
 ---
 
 ## 5-5) Diagramme de classes du système
 
-Le diagramme de classes complet est modélisé dans [`uml/atelier_conditionnement.mdj`](../uml/atelier_conditionnement.mdj) (modèle **`3) Diagramme de classes`** → **`Diagramme de classes - Système de conditionnement`**).
+Le diagramme de classes complet (issu de la **fusion optimale** des modèles du groupe) se trouve dans [`uml/atelier_conditionnement.mdj`](../uml/atelier_conditionnement.mdj) (modèle **`3) Diagramme de classes`** → **`Diagramme de classes - Système de conditionnement`**).
 
-> *Conformité avec la démarche du cours (`R303_UML9.pdf`, p. 16)* : ce diagramme constitue une **conception complète V1** couvrant l'ensemble des **24 classes** de `5-3`. Il intègre **sans aucune altération** le sous-modèle imposé par le dossier technique p. 7 pour les magasins automatiques, et sera validé puis affiné lors des diagrammes de séquence des Séances 3 (`5-8`) et 4 (`5-9`).
+> *Conformité avec la démarche du cours (`R303_UML9.pdf`, p. 16)* : ce diagramme constitue une **conception complète V1** couvrant l'ensemble des **24 classes** de `5-3` (`0` classe isolée). Il intègre **sans aucune altération** le sous-modèle imposé par le dossier technique p. 7 pour les magasins automatiques, et sera validé puis affiné lors des diagrammes de séquence des Séances 3 (`5-8`) et 4 (`5-9`).
 
 ### Choix de modélisation et justifications précises
 
-1. **Conformité aux conventions UML du cours (E. Porcq)** :
-   - **Pas de redondance attribut / rôle** (`R201_UML3.pdf`, p. 18) : lorsqu'une classe détient une référence vers une autre classe via une association navigable dotée d'un nom de rôle (ex. `-magasin`, `-tas[]`, `-client`, `-lignes`), ce lien n'est pas dupliqué dans le compartiment des attributs.
-   - **Rôles systématiques et navigabilité explicite** : toutes les associations utiles portent leurs rôles, leurs multiplicités et leur flèche de navigabilité.
+1. **Conformité aux conventions UML du cours (E. Porcq) & StarUML** :
+   - **Pas de redondance attribut / rôle** (`R201_UML3.pdf`, p. 18) : lorsqu'une classe détient une référence vers une autre classe via une association navigable dotée d'un nom de rôle privé (ex. `-magasin`, `-tas[]`, `-client`, `-lignes`), ce lien n'est pas dupliqué dans le compartiment des attributs.
+   - **Typage homogène** (`int`, `double`, `boolean`, `String`, `Date`, `json`) et **rôles privés normalisés** (`visibility: "private"`, `navigable: "navigable"`).
 2. **Gestion des commandes et résolution N:N (`Commande` – `LigneCommande` – `Medicament`)** :
    - Une commande regroupe plusieurs médicaments et un même médicament apparaît dans de nombreuses commandes. La classe **`LigneCommande`** matérialise l'association porteuse d'attributs (`quantiteDemandee`, `quantitePreparee`) dans une composition `Commande (1)` ◆──`-lignes (1..*)`──▶ `LigneCommande`, chaque ligne pointant vers un `Medicament` (`-medicament (1)`).
    - La relation `Commande (*)` ──`-client (1)`──▶ `Pharmacie` rattache chaque commande à sa pharmacie destinataire (`nom`, `adresse`, `telephone`).
-   - `IHM` interagit avec `Pharmacie` et `Commande` pour la saisie/programmation des commandes ; `RapportProduction` référence les `Commande` traitées pour générer les bilans sauvegardés sur NFS.
-3. **Traçabilité physique et documentaire (`Caisse`, `BonDeLivraison`, `Facture`, `TicketAdresse`, `Itineraire`)** :
-   - Chaque `Caisse` en circulation (identifiée par `codeBarre` unique) porte ses mesures (`tare`, `masseCourante`, `masseAttendue`, `nbPassagesMSA`, `etat`) et référence le `BonDeLivraison` (`0..1`), la `Facture` (`0..1`) et le `TicketAdresse` (`0..1`) associés.
-   - `BonDeLivraison`, `Facture` et `TicketAdresse` pointent chacun vers l'`Imprimante` chargée de leur impression (`LCT`, `FAC`, `ADR`), et dépendent des données de `Commande` / `Pharmacie`.
-   - `Itineraire` est composé (`◆`) d'une suite ordonnée de `1..*` **`EtapeItineraire`**, dont les attributs (`numPos`, `positionConv`, `numLCB`, `cmdAiguillage`, `poidsPrevu`) reflètent exactement la structure du fichier officiel **`itineraire.ods`**.
+   - `IHM` interagit avec `Pharmacie` et `Commande` ; `RapportProduction` référence les `Commande` traitées pour générer les bilans sauvegardés sur NFS.
+3. **Graphe documentaire allégé autour de `Commande` et suivi de `Caisse`** :
+   - `Commande` porte directement les liens vers ses entités associées (`-ticket`, `-facture`, `-bl`, `-caisse`), évitant les liaisons redondantes et croisées vers `Facture` et `TicketAdresse` depuis `Caisse`, tout en conservant le lien direct `Caisse (1)` ──`-bl (0..1)`──▶ `BonDeLivraison` (dépôt physique du BL imprimé dans la caisse).
+   - `BonDeLivraison`, `Facture` et `TicketAdresse` pointent chacun vers l'`Imprimante` chargée de leur édition (`LCT`, `FAC`, `ADR`).
+   - `Caisse` compose (`◆`) son `Itineraire` (`0..1`), lui-même composé (`◆`) d'une suite ordonnée de `1..*` **`EtapeItineraire`**, dont les attributs (`numPos`, `positionConv`, `numLCB`, `cmdAiguillage`, `poidsPrevu`) reflètent exactement la structure de **`itineraire.ods`**.
 4. **Équipements de convoyage, pesée et postes semi-automatiques** :
-   - Chaque équipement matériel piloté ou interrogé (`LecteurCodeBarre`, `Aiguillage`, `Convoyeur`, `Balance`, `Imprimante`) possède sa propre classe logicielle image avec ses identifiants et opérations primitives (`lireCodeBarre()`, `orienter()`, `demarrer()`/`arreter()`/`debrayer()`, `peser()`, `imprimer()`).
-   - `PosteSemiAuto` (`MSA1`–`MSA8`) agrège/référence ses équipements dédiés : `1` `LecteurCodeBarre` (`-lcb`), `1` `Balance` (`-balance`) et `1` `Convoyeur` parallèle (`-convoyeurParallele`).
-   - `Caisse` peut être lue par `LecteurCodeBarre` et pesée par `Balance` lors de son parcours défini par `Itineraire`.
+   - Chaque équipement matériel (`LecteurCodeBarre`, `Aiguillage`, `Convoyeur`, `Balance`, `Imprimante`) possède sa propre classe logicielle image.
+   - `EtapeItineraire` référence les équipements impliqués à chaque étape (`LecteurCodeBarre`, `Balance`, `Aiguillage`, `Convoyeur`), et `PosteSemiAuto` (`MSA1`–`MSA8`) référence ses équipements dédiés (`-lcb`, `-balance`, `-convoyeurParallele`). Aucune classe du diagramme n'est isolée.
 5. **Intégration stricte du sous-modèle imposé des magasins automatiques (Dossier Technique p. 7)** :
-   - Les 5 classes **`Magasin`**, **`TapisRoulant`**, **`Tas`**, **`FileDeCommande`** et **`Codeur`** conservent **exactement** leurs noms, attributs, méthodes, types, visibilités, rôles et compositions imposés :
+   - Les 5 classes **`Magasin`**, **`TapisRoulant`**, **`Tas`**, **`FileDeCommande`** et **`Codeur`** conservent **exactement** leurs noms, attributs, méthodes, types, multiplicités, visibilités, rôles, compositions et disposition imposés :
      - `TapisRoulant (1)` ◆──`-tas[] (*)`──▶ `Tas`
      - `TapisRoulant (1)` ◆──`-codeur (1)`──▶ `Codeur`
-     - `TapisRoulant` ──`-file`──▶ `FileDeCommande`
+     - `TapisRoulant` ──`-file (1)`──▶ `FileDeCommande`
      - `Tas (*)` ──`-magasin (1)`──▶ `Magasin`
-   - *Note de fidélité sur `Tas`* : le dossier technique p. 7 déclare `-codeCIP: String[20]` / `-quantiteAMettre: int[20]` en attributs mais `+Tas(code: String[200], nb: int[200])` en constructeur. Cet écart typographique du sujet d'origine est volontairement conservé à l'identique afin de garantir une conformité stricte avec la question `5-9`.
-   - Extension cohérente vers l'atelier : `Magasin (1)` ◆──`-ejecteurs (40)`──▶ `Ejecteur` modélise les 40 rails/éjecteurs par magasin automatique, chaque `Ejecteur` référençant le `Medicament` (`0..1`) stocké dans sa goulotte (`stockGoulotte`, `etatCellulePhoto`). `FileDeCommande` maintient l'ordre des `Commande` transmises au magasin.
+   - *Note de fidélité sur `Tas`* : le dossier technique p. 7 déclare `-codeCIP: String[20]` / `-quantiteAMettre: int[20]` en attributs mais `+Tas(code: String[200], nb: int[200])` en constructeur. Cet écart typographique du sujet d'origine est volontairement conservé à l'identique (avec `multiplicity: "20"` et `"200"` dans StarUML) afin de garantir une conformité stricte avec la question `5-9`.
+   - Extension cohérente vers l'atelier : `Magasin (1)` ◆──`-ejecteurs (40)`──▶ `Ejecteur` modélise les 40 rails/éjecteurs par magasin automatique, chaque `Ejecteur` référençant le `Medicament` (`0..1`) stocké dans sa goulotte (`stockGoulotte`, `etatCellulePhoto`). `FileDeCommande` référence les `Commande` en attente transmises au magasin.
 
 ### Récapitulatif des 24 classes par domaine
 
@@ -288,29 +300,29 @@ classDiagram
         -etat: String
         +Commande(num: int, type: String)
         +ajouterLigne(med: Medicament, qte: int): void
-        +calculerPoidsTotal(): float
-        +estUrgente(): bool
+        +calculerMasseTotale(): double
+        +estUrgente(): boolean
     }
 
     class LigneCommande {
         -quantiteDemandee: int
         -quantitePreparee: int
         +LigneCommande(med: Medicament, qte: int)
-        +getSousTotalPoids(): float
-        +getSousTotalPrix(): float
-        +estComplete(): bool
+        +calculerSousTotal(): double
+        +calculerMasse(): double
+        +estComplete(): boolean
     }
 
     class Medicament {
         -codeCIP: String
         -designation: String
         -codeGeo: String
-        -masseUnitaire: float
-        -prixUnitaire: float
+        -masseUnitaire: double
+        -prixUnitaire: double
         -typeConditionnement: String
         +getCodeCIP(): String
-        +getMasseUnitaire(): float
-        +estEnMagasinAuto(): bool
+        +getMasseUnitaire(): double
+        +estEnMagasinAuto(): boolean
     }
 
     class IHM {
@@ -326,7 +338,7 @@ classDiagram
         -nbCommandesTraitees: int
         -nbErreurs: int
         +generer(): void
-        +sauvegarderNFS(chemin: String): bool
+        +sauvegarderNFS(chemin: String): boolean
     }
 
     class BonDeLivraison {
@@ -339,9 +351,9 @@ classDiagram
     class Facture {
         -numeroFacture: int
         -dateFacture: Date
-        -montantTotal: float
+        -montantTotal: double
         +Facture(cmd: Commande)
-        +calculerMontant(): float
+        +calculerMontant(): double
     }
 
     class TicketAdresse {
@@ -352,14 +364,14 @@ classDiagram
 
     class Caisse {
         -codeBarre: String
-        -tare: float
-        -masseCourante: float
-        -masseAttendue: float
+        -tare: double
+        -masseCourante: double
+        -masseAttendue: double
         -nbPassagesMSA: int
         -etat: String
         +Caisse(codeBarre: String)
-        +tarer(masse: float): void
-        +verifierPoids(masseMesuree: float): bool
+        +tarer(masse: double): void
+        +verifierPoids(masseMesuree: double): boolean
         +incrementerPassagesMSA(): int
     }
 
@@ -369,7 +381,7 @@ classDiagram
         +Itineraire(cmd: Commande)
         +calculer(): void
         +getEtapeSuivante(): EtapeItineraire
-        +sauvegarderNFS(chemin: String): bool
+        +sauvegarderNFS(chemin: String): boolean
     }
 
     class EtapeItineraire {
@@ -377,21 +389,21 @@ classDiagram
         -positionConv: int
         -numLCB: int
         -cmdAiguillage: String
-        -poidsPrevu: float
-        +EtapeItineraire(pos: int, conv: int, lcb: int, aig: String, poids: float)
-        +getPoidsPrevu(): float
+        -poidsPrevu: double
+        +EtapeItineraire(pos: int, conv: int, lcb: int, aig: String, poids: double)
+        +getPoidsPrevu(): double
     }
 
     class Imprimante {
         -idImprimante: int
         -poste: String
-        +imprimer(contenu: String): bool
+        +imprimer(contenu: String): boolean
     }
 
     class PosteSemiAuto {
         -idMSA: int
-        -disponible: bool
-        +estDisponible(): bool
+        -disponible: boolean
+        +estDisponible(): boolean
         +signalerFinPreparation(caisse: Caisse): void
     }
 
@@ -411,7 +423,7 @@ classDiagram
     class Convoyeur {
         -idConvoyeur: int
         -type: String
-        -etatMarche: bool
+        -etatMarche: boolean
         +demarrer(): void
         +arreter(): void
         +debrayer(): void
@@ -420,13 +432,13 @@ classDiagram
     class Balance {
         -idBalance: int
         -adresseModbus: int
-        -dernierPoids: float
-        +peser(): float
+        -dernierPoids: double
+        +peser(): double
     }
 
     class Magasin {
         -idMagasin: int
-        -disponible: bool
+        -disponible: boolean
         +lireCode(code: int): String
         +ejecterMedicament(pos: int, nb: int): int
     }
@@ -434,9 +446,9 @@ classDiagram
     class Ejecteur {
         -numero: int
         -stockGoulotte: int
-        -etatCellulePhoto: bool
+        -etatCellulePhoto: boolean
         +ejecter(nb: int): int
-        +verifierChute(): bool
+        +verifierChute(): boolean
     }
 
     class Tas {
@@ -465,30 +477,30 @@ classDiagram
         +attendreSynchro()
     }
 
+    IHM --> "*" Pharmacie : -pharmacies
+    IHM --> "*" Commande : -commandes
     Commande "*" --> "1" Pharmacie : -client
     Commande "1" *-- "1..*" LigneCommande : -lignes
     LigneCommande "*" --> "1" Medicament : -medicament
-    IHM --> "*" Commande : -commandes
-    IHM --> "*" Pharmacie : -pharmacies
     RapportProduction "*" --> "*" Commande : -commandes
 
-    BonDeLivraison "0..1" --> "1" Commande : -commande
-    Facture "0..1" --> "1" Commande : -commande
     TicketAdresse "*" --> "1" Pharmacie : -destinataire
-    BonDeLivraison "*" --> "1" Imprimante : -imprimante
-    Facture "*" --> "1" Imprimante : -imprimante
-    TicketAdresse "*" --> "1" Imprimante : -imprimante
+    Commande "1" --> "0..1" TicketAdresse : -ticket
+    Commande "1" --> "0..1" Facture : -facture
+    Commande "1" --> "0..1" BonDeLivraison : -bl
+    Commande "1" --> "0..1" Caisse : -caisse
 
-    Caisse "0..1" --> "1" Commande : -commande
     Caisse "1" --> "0..1" BonDeLivraison : -bl
-    Caisse "1" --> "0..1" Facture : -facture
-    Caisse "1" --> "0..1" TicketAdresse : -ticket
     Caisse "1" *-- "0..1" Itineraire : -itineraire
     Itineraire "1" *-- "1..*" EtapeItineraire : -etapes
 
+    TicketAdresse "*" --> "1" Imprimante : -imprimante
+    Facture "*" --> "1" Imprimante : -imprimante
+    BonDeLivraison "*" --> "1" Imprimante : -imprimante
+
     EtapeItineraire "*" --> "0..1" LecteurCodeBarre : -lcb
-    EtapeItineraire "*" --> "0..1" Aiguillage : -aiguillage
     EtapeItineraire "*" --> "0..1" Balance : -balance
+    EtapeItineraire "*" --> "0..1" Aiguillage : -aiguillage
     EtapeItineraire "*" --> "1" Convoyeur : -convoyeur
 
     PosteSemiAuto "*" --> "1" LecteurCodeBarre : -lcb
